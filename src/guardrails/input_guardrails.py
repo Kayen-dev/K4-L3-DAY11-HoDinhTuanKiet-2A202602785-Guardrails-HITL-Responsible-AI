@@ -44,6 +44,16 @@ INJECTION_PATTERNS = (
     r"\b(?:tiet\s+lo|hien\s+thi|cho\s+toi\s+xem)\b.{0,100}\b(?:mat\s+khau|api\s*key|system\s+prompt|bi\s+mat|cau\s+hinh)\b",
 )
 
+# Require a harmful action plus a protected place/asset. This catches criminal
+# intent without blocking ordinary requests about withdrawing or storing gold.
+HARMFUL_INTENT_PATTERNS = (
+    r"\b(?:dot\s+nhap|xam\s+nhap|vao\s+(?:ben\s+)?trong|vao\s+kho|pha\s+khoa|vuot\s+bao\s+ve|break\s+into|get\s+inside|enter\s+(?:the\s+)?vault)\b.{0,100}\b(?:lay|trom|cuop|chiem\s+doat|steal|take|rob)\b.{0,50}\b(?:vang|tien|tai\s+san|gold|money|cash|valuables?)\b",
+    r"\b(?:ngan\s+hang|bank|kho|vault)\b.{0,80}\b(?:vang|tien|tai\s+san|gold|money|cash|valuables?)\b.{0,80}\b(?:vao\s+(?:ben\s+)?trong|dot\s+nhap|xam\s+nhap|get\s+inside|break\s+into)\b.{0,60}\b(?:lay|trom|cuop|steal|take|rob)\b",
+    r"\b(?:cach|lam\s+sao|nhu\s+nao|how\s+(?:do|can|to))\b.{0,120}\b(?:cuop|trom|dot\s+nhap|xam\s+nhap|rob|steal|break\s+into)\b.{0,120}\b(?:ngan\s+hang|bank|kho|vault)\b",
+    r"\b(?:cuop|trom|chiem\s+doat|rob|steal)\b.{0,80}\b(?:ngan\s+hang|bank|kho|vault|vang|gold|tien|money|cash)\b",
+    r"\b(?:ngan\s+hang|bank|kho|vault)\b.{0,100}\b(?:cuop|trom|dot\s+nhap|xam\s+nhap|rob|steal|break\s+into)\b",
+)
+
 EXTRA_ALLOWED_TOPICS = (
     "bank", "debit", "mortgage", "statement", "pin", "otp", "fee", "hotline",
     "mat khau", "ma pin", "ma otp", "sao ke", "rut tien", "nap tien", "phi",
@@ -118,6 +128,17 @@ def detect_injection(user_input: str) -> InputStatus:
     return "ALLOW"
 
 
+def detect_harmful_intent(user_input: str) -> InputStatus:
+    """Block contextual theft, robbery, and physical-intrusion requests."""
+    normalized = normalize_security_text(user_input, strip_accents=True)
+    if any(
+        re.search(pattern, normalized, re.IGNORECASE)
+        for pattern in HARMFUL_INTENT_PATTERNS
+    ):
+        return "BLOCK"
+    return "ALLOW"
+
+
 # ============================================================
 # Implement topic_filter()
 #
@@ -141,6 +162,9 @@ def topic_filter(user_input: str) -> InputStatus:
     """
     normalized = normalize_security_text(user_input, strip_accents=True)
     if not normalized:
+        return "BLOCK"
+
+    if detect_harmful_intent(normalized) == "BLOCK":
         return "BLOCK"
 
     if any(_contains_topic(normalized, topic) for topic in BLOCKED_TOPICS):
@@ -207,6 +231,13 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
             return self._block_response(
                 "I cannot process instruction-override or credential requests. "
                 "I can still help with a normal VinBank banking question."
+            )
+
+        if detect_harmful_intent(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "I cannot help with theft, robbery, or unauthorized physical access. "
+                "I can explain legitimate VinBank security and account procedures."
             )
 
         if topic_filter(text) == "BLOCK":

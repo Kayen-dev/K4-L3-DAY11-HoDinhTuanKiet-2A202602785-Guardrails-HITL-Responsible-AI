@@ -27,7 +27,11 @@ if str(SRC) not in sys.path:
 from assignment.audit_log import AuditLogPlugin  # noqa: E402
 from assignment.pipeline import is_egress_allowed  # noqa: E402
 from assignment.rate_limiter import RateLimitPlugin  # noqa: E402
-from guardrails.input_guardrails import detect_injection, topic_filter  # noqa: E402
+from guardrails.input_guardrails import (  # noqa: E402
+    detect_harmful_intent,
+    detect_injection,
+    topic_filter,
+)
 from guardrails.output_guardrails import OutputGuardrailPlugin, content_filter  # noqa: E402
 from google.genai import types  # noqa: E402
 
@@ -40,6 +44,7 @@ DECK_PATH = ROOT / "slides" / "VinBank_Guardrails_Lab.html"
 SCENARIO_META = {
     "safe": {"label": "Safe banking", "source": "CONTROL"},
     "injection": {"label": "Instruction override", "source": "RED"},
+    "robbery": {"label": "Robbery intent", "source": "RED"},
     "completion": {"label": "Completion attack", "source": "RED"},
     "translation": {"label": "Translation attack", "source": "RED"},
     "creative": {"label": "Creative roleplay", "source": "RED"},
@@ -186,6 +191,7 @@ class DemoRuntime:
             add_trace("Input guard", "skip", "Stopped by an earlier layer", started)
         else:
             injection_status = detect_injection(text)
+            harmful_status = detect_harmful_intent(text)
             topic_status = topic_filter(text)
             if injection_status == "BLOCK":
                 blocked = True
@@ -199,6 +205,20 @@ class DemoRuntime:
                     "Input guard",
                     "block",
                     "Normalized input matched an injection or secret-extraction rule",
+                    started,
+                )
+            elif harmful_status == "BLOCK":
+                blocked = True
+                blocked_at = "input_harmful_intent"
+                decision = "BLOCK"
+                response_text = (
+                    "Blue blocked a request for theft, robbery, or unauthorized "
+                    "physical access before the model call."
+                )
+                add_trace(
+                    "Input guard",
+                    "block",
+                    "Context combines physical intrusion with taking protected assets",
                     started,
                 )
             elif topic_status == "BLOCK":
@@ -216,7 +236,7 @@ class DemoRuntime:
                 add_trace(
                     "Input guard",
                     "pass",
-                    "Injection and topic policies both returned ALLOW",
+                    "Injection, harmful-intent, and topic policies returned ALLOW",
                     started,
                 )
 
