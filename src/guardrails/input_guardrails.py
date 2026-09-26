@@ -35,6 +35,7 @@ INJECTION_PATTERNS = (
     r"\bact\s+as\s+(?:a\s+|an\s+)?(?:unrestricted|uncensored|unfiltered|jailbroken|developer|administrator|root)\b",
     r"\b(?:dan|jailbreak|developer\s+mode)\b",
     r"\b(?:fill|complete)\b.{0,100}\b(?:blank|password|api\s*key|secret|database|credential)\b",
+    r"\b(?:fill|complete)\b.{0,100}\b(?:admin[_\s-]?password|api[_\s-]?key|database[_\s-]?host)\b",
     r"\b(?:base64|rot13|hex)\b.{0,100}\b(?:secret|password|api\s*key|system\s+prompt|credential)\b",
     r"\b(?:confirm|verify)\b.{0,80}\b(?:admin\s+)?(?:password|api\s*key|secret|credential)\b",
     r"\b(?:ciso|root\s+admin|security\s+auditor)\b.{0,100}\b(?:password|api\s*key|credential|secret)\b",

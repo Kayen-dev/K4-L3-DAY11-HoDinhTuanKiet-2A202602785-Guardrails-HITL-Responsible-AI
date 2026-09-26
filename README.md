@@ -134,3 +134,19 @@ pip install -r requirements.txt
 Rồi mở [`CHECKPOINTS.md`](CHECKPOINTS.md) và làm lần lượt Checkpoint 1 → 5.
 
 Nộp theo [`SUBMISSION.md`](SUBMISSION.md) · Quy định: [`RULES.md`](RULES.md).
+
+---
+
+## 4. Chạy UI demo Red → Blue
+
+UI thuyết trình dùng guardrail Python thật cho các lớp rate limit, input, output,
+egress và audit. Model stage là deterministic để demo lặp lại được, không tốn API
+quota; kết quả Red Team gọi model thật vẫn nằm trong `outputs/attack_results.json`.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\demo_server.py --port 8765
+```
+
+Mở `http://127.0.0.1:8765/#slide-8`, chọn một kỹ thuật Red Team rồi bấm
+**Run Blue policy**. Nếu chỉ mở file HTML trực tiếp, UI vẫn chạy bằng browser
+fallback và badge sẽ ghi rõ `OFFLINE · BROWSER FALLBACK`.
