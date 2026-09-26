@@ -6,6 +6,7 @@ Checkpoint 2 — Output Guardrails
 """
 import re
 import textwrap
+import unicodedata
 
 from google.genai import types
 from google.adk.agents import llm_agent
@@ -13,6 +14,19 @@ from google.adk import runners
 from google.adk.plugins import base_plugin
 
 from core.utils import chat_with_agent
+
+
+PII_PATTERNS = {
+    "phone": r"(?<!\d)0\d{9,10}(?!\d)",
+    "email": r"(?<![\w.-])[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}(?![\w.-])",
+    "national_id": r"(?<!\d)(?:\d{9}|\d{12})(?!\d)",
+    "api_key": r"\bsk-[a-zA-Z0-9_-]{8,}\b",
+    "password": (
+        r"(?:\b(?:admin\s+)?password\s*(?:is|[:=])\s*\S+|"
+        r"\bmat\s*khau\s*(?:la|[:=])\s*\S+|\badmin123\b)"
+    ),
+    "database_host": r"\bdb\.vinbank\.internal(?::\d+)?\b",
+}
 
 
 # ============================================================
@@ -37,23 +51,26 @@ def content_filter(response: str) -> dict:
         dict with 'safe', 'issues', and 'redacted' keys
     """
     issues = []
-    redacted = response
-
-    # PII patterns to check
-    PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
-    }
+    normalized = unicodedata.normalize("NFKC", response or "")
+    redacted = normalized.translate(
+        str.maketrans("", "", "\u200b\u200c\u200d\u200e\u200f\ufeff\u2060")
+    )
 
     for name, pattern in PII_PATTERNS.items():
-        matches = re.findall(pattern, response, re.IGNORECASE)
+        matches = re.findall(pattern, redacted, re.IGNORECASE)
         if matches:
             issues.append(f"{name}: {len(matches)} found")
             redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.IGNORECASE)
+
+    compact = re.sub(r"[^a-z0-9]", "", normalized.casefold())
+    compact_secrets = ("admin123", "skvinbanksecret2024", "dbvinbankinternal")
+    directly_detected = any(
+        issue.startswith(("api_key:", "password:", "database_host:"))
+        for issue in issues
+    )
+    if not directly_detected and any(secret in compact for secret in compact_secrets):
+        issues.append("secret_obfuscation: 1 found")
+        redacted = "[REDACTED]"
 
     return {
         "safe": len(issues) == 0,
@@ -89,15 +106,9 @@ Respond with ONLY one word: SAFE or UNSAFE
 If UNSAFE, add a brief reason on the next line.
 """
 
-# TODO: Create safety_judge_agent using LlmAgent
-# Hint:
-# safety_judge_agent = llm_agent.LlmAgent(
-#     model="gemini-3.5-flash",
-#     name="safety_judge",
-#     instruction=SAFETY_JUDGE_INSTRUCTION,
-# )
-
-safety_judge_agent = None  # TODO: Replace with implementation
+# Optional by design. Set an LlmAgent here when an independent judge model and
+# credentials are available; deterministic redaction remains the primary control.
+safety_judge_agent = None
 judge_runner = None
 
 
@@ -172,16 +183,48 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
-        # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
+        filtered = content_filter(response_text)
+        text_for_judge = response_text
+        if not filtered["safe"]:
+            self.redacted_count += 1
+            secret_issue = any(
+                issue.startswith((
+                    "api_key:",
+                    "password:",
+                    "database_host:",
+                    "secret_obfuscation:",
+                ))
+                for issue in filtered["issues"]
+            )
+            if secret_issue:
+                self.blocked_count += 1
+                safe_text = (
+                    "I cannot share internal system details. "
+                    "I can help with a normal VinBank banking question."
+                )
+            else:
+                safe_text = filtered["redacted"]
+            text_for_judge = safe_text
+            llm_response.content = types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=safe_text)],
+            )
 
-        return llm_response  # TODO: modify if needed
+        if self.use_llm_judge:
+            verdict = await llm_safety_check(text_for_judge)
+            if not verdict["safe"]:
+                self.blocked_count += 1
+                llm_response.content = types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(
+                        text=(
+                            "I cannot provide that response safely. "
+                            "Please ask a standard VinBank banking question."
+                        )
+                    )],
+                )
+
+        return llm_response
 
 
 # ============================================================

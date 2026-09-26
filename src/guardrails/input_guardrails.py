@@ -11,6 +11,7 @@ Status convention (không dùng True/False mơ hồ):
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Literal
 
 from google.genai import types
@@ -21,6 +22,52 @@ from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS
 
 # Quyết định rõ ràng — tránh đảo nghĩa True/False
 InputStatus = Literal["ALLOW", "BLOCK"]
+
+ZERO_WIDTH_CHARS = "\u200b\u200c\u200d\u200e\u200f\ufeff\u2060"
+
+INJECTION_PATTERNS = (
+    r"\bignore\s+(?:all\s+)?(?:(?:previous|prior|above)\s+)?(?:instructions?|rules?|directions?)\b",
+    r"\b(?:disregard|forget|override|bypass)\s+(?:all\s+)?(?:previous\s+|prior\s+|above\s+|system\s+|developer\s+)?(?:instructions?|rules?|guardrails?|safety|prompt)\b",
+    r"\byou\s+are\s+now\b",
+    r"\b(?:system|developer)\s+(?:prompt|message|instructions?)\b",
+    r"\b(?:reveal|show|print|repeat|display|expose|disclose|dump|translate|encode)\b.{0,100}\b(?:system\s+)?(?:instructions?|prompt|secrets?|credentials?|password|api\s*key|database|config(?:uration)?)\b",
+    r"\bpretend\s+(?:that\s+)?(?:you\s+are|to\s+be)\b",
+    r"\bact\s+as\s+(?:a\s+|an\s+)?(?:unrestricted|uncensored|unfiltered|jailbroken|developer|administrator|root)\b",
+    r"\b(?:dan|jailbreak|developer\s+mode)\b",
+    r"\b(?:fill|complete)\b.{0,100}\b(?:blank|password|api\s*key|secret|database|credential)\b",
+    r"\b(?:base64|rot13|hex)\b.{0,100}\b(?:secret|password|api\s*key|system\s+prompt|credential)\b",
+    r"\b(?:confirm|verify)\b.{0,80}\b(?:admin\s+)?(?:password|api\s*key|secret|credential)\b",
+    r"\b(?:ciso|root\s+admin|security\s+auditor)\b.{0,100}\b(?:password|api\s*key|credential|secret)\b",
+    r"\b(?:write|tell|create)\b.{0,180}\b(?:story|fiction(?:al)?|scene)\b.{0,180}\b(?:password|api\s*key|credential|secret)\b",
+    r"\bbo\s+qua\s+(?:moi\s+)?(?:huong\s+dan|chi\s+dan|quy\s+tac)\b",
+    r"\b(?:tiet\s+lo|hien\s+thi|cho\s+toi\s+xem)\b.{0,100}\b(?:mat\s+khau|api\s*key|system\s+prompt|bi\s+mat|cau\s+hinh)\b",
+)
+
+EXTRA_ALLOWED_TOPICS = (
+    "bank", "debit", "mortgage", "statement", "pin", "otp", "fee", "hotline",
+    "mat khau", "ma pin", "ma otp", "sao ke", "rut tien", "nap tien", "phi",
+)
+
+
+def normalize_security_text(text: str, *, strip_accents: bool = False) -> str:
+    """Canonicalize user-controlled text before applying security rules."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    normalized = normalized.translate(str.maketrans("", "", ZERO_WIDTH_CHARS))
+    if strip_accents:
+        normalized = "".join(
+            char
+            for char in unicodedata.normalize("NFKD", normalized)
+            if not unicodedata.combining(char)
+        )
+        normalized = normalized.replace("đ", "d").replace("Đ", "D")
+    return re.sub(r"\s+", " ", normalized).strip().casefold()
+
+
+def _contains_topic(text: str, topic: str) -> bool:
+    topic = normalize_security_text(topic, strip_accents=True)
+    if " " in topic:
+        return topic in text
+    return re.search(rf"(?<!\w){re.escape(topic)}(?!\w)", text) is not None
 
 
 # ============================================================
@@ -51,15 +98,22 @@ def detect_injection(user_input: str) -> InputStatus:
     Returns:
         ``"BLOCK"`` if injection detected (chặn), ``"ALLOW"`` otherwise (cho qua).
     """
-    INJECTION_PATTERNS = [
-        # TODO: Add at least 5 regex patterns
-        # Example:
-        # r"ignore (all )?(previous|above) instructions",
-    ]
-
+    normalized = normalize_security_text(user_input, strip_accents=True)
     for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, user_input, re.IGNORECASE):
+        if re.search(pattern, normalized, re.IGNORECASE):
             return "BLOCK"
+
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    compact_signatures = (
+        "ignoreallpreviousinstructions",
+        "ignorepreviousinstructions",
+        "youarenowdan",
+        "revealsystemprompt",
+        "showmesystemprompt",
+        "bypassguardrails",
+    )
+    if any(signature in compact for signature in compact_signatures):
+        return "BLOCK"
     return "ALLOW"
 
 
@@ -84,14 +138,17 @@ def topic_filter(user_input: str) -> InputStatus:
         ``"BLOCK"`` = chặn (off-topic hoặc topic cấm).
         ``"ALLOW"`` = cho qua (câu banking hợp lệ).
     """
-    input_lower = user_input.lower()
+    normalized = normalize_security_text(user_input, strip_accents=True)
+    if not normalized:
+        return "BLOCK"
 
-    # TODO: Implement logic:
-    # 1. If input contains any blocked topic -> return "BLOCK"
-    # 2. If input doesn't contain any allowed topic -> return "BLOCK"
-    # 3. Otherwise -> return "ALLOW"
+    if any(_contains_topic(normalized, topic) for topic in BLOCKED_TOPICS):
+        return "BLOCK"
 
-    pass  # Replace with your implementation
+    allowed_topics = (*ALLOWED_TOPICS, *EXTRA_ALLOWED_TOPICS)
+    if not any(_contains_topic(normalized, topic) for topic in allowed_topics):
+        return "BLOCK"
+    return "ALLOW"
 
 
 # ============================================================
@@ -144,14 +201,20 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
         self.total_count += 1
         text = self._extract_text(user_message)
 
-        # TODO: Implement logic:
-        # 1. Call detect_injection(text)
-        #    - If "BLOCK": increment blocked_count, return self._block_response("...")
-        # 2. Call topic_filter(text)
-        #    - If "BLOCK": increment blocked_count, return self._block_response("...")
-        # 3. If both return "ALLOW": return None (let message through)
+        if detect_injection(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "I cannot process instruction-override or credential requests. "
+                "I can still help with a normal VinBank banking question."
+            )
 
-        pass  # Replace with your implementation
+        if topic_filter(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "I can only help with VinBank banking-related questions."
+            )
+
+        return None
 
 
 # ============================================================
