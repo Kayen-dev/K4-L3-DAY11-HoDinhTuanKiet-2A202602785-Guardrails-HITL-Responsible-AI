@@ -19,6 +19,11 @@ import asyncio
 import sys
 from pathlib import Path
 
+# Windows terminals may default to cp1252 even though the lab output is UTF-8.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 # Cho phép chạy ``python src/main.py`` từ gốc repo
 _SRC_DIR = Path(__file__).resolve().parent
 if str(_SRC_DIR) not in sys.path:
@@ -140,18 +145,30 @@ async def main(parts=None):
         parts = [2, 3, 4]  # Core: CP2 → CP3 → CP4
 
     for part in parts:
-        if part == 2:
-            await part2_guardrails()
-        elif part == 3:
-            await part3_assignment_suite()
-        elif part == 4:
-            await part4_attacks()
-        else:
-            print(f"Unknown part: {part}. Dùng --part 2, 3, hoặc 4.")
+        try:
+            if part == 2:
+                await part2_guardrails()
+            elif part == 3:
+                await part3_assignment_suite()
+            elif part == 4:
+                await part4_attacks()
+            else:
+                print(f"Unknown part: {part}. Dùng --part 2, 3, hoặc 4.")
+        except Exception as exc:
+            print("\n" + "=" * 60)
+            print(f"Checkpoint {part} failed ({type(exc).__name__}).")
+            if part == 4:
+                print(
+                    "No Red Team artifact was generated. Verify RED_TEAM_PROVIDER "
+                    "and its API key in .env, then run --part 4 again."
+                )
+            print("=" * 60)
+            return False
 
     print("\n" + "=" * 60)
     print("Lab 11 complete! Check your results above.")
     print("=" * 60)
+    return True
 
 
 if __name__ == "__main__":
@@ -170,6 +187,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.part:
-        asyncio.run(main(parts=[args.part]))
+        succeeded = asyncio.run(main(parts=[args.part]))
     else:
-        asyncio.run(main())
+        succeeded = asyncio.run(main())
+    if not succeeded:
+        raise SystemExit(1)

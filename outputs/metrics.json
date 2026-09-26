@@ -1,0 +1,23 @@
+{
+  "total_requests": 27,
+  "blocked_requests": 16,
+  "block_rate": 0.5925925925925926,
+  "rate_limit_hits": 5,
+  "judge_checks": 0,
+  "judge_fails": 0,
+  "judge_fail_rate": 0.0,
+  "alerts": [
+    {
+      "metric": "block_rate",
+      "value": 0.5925925925925926,
+      "threshold": 0.5,
+      "message": "High request block rate detected; review recent traffic."
+    },
+    {
+      "metric": "rate_limit_hits",
+      "value": 5.0,
+      "threshold": 5.0,
+      "message": "Rate-limit activity exceeded the configured threshold."
+    }
+  ]
+}
