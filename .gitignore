@@ -207,3 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 template-codelabs
+
+# Local presentation exports (the submission uses the self-contained HTML deck)
+slides/*.pptx
