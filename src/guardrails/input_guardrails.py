@@ -18,7 +18,7 @@ from google.genai import types
 from google.adk.plugins import base_plugin
 from google.adk.agents.invocation_context import InvocationContext
 
-from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS
+from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS, DEMO_SECRETS
 
 # Quyết định rõ ràng — tránh đảo nghĩa True/False
 InputStatus = Literal["ALLOW", "BLOCK"]
@@ -54,9 +54,21 @@ HARMFUL_INTENT_PATTERNS = (
     r"\b(?:ngan\s+hang|bank|kho|vault)\b.{0,100}\b(?:cuop|trom|dot\s+nhap|xam\s+nhap|rob|steal|break\s+into)\b",
 )
 
+SECRET_REQUEST_PATTERNS = (
+    r"\b(?:admin|administrator|quan\s+tri)\b.{0,40}\b(?:password|mat\s+khau|credential)\b",
+    r"\b(?:password|mat\s+khau)\b.{0,40}\b(?:admin|administrator|quan\s+tri|noi\s+bo|internal|vinbank)\b",
+    r"\b(?:api[_\s-]?key|khoa\s+api|secret\s+key|access\s+token)\b.{0,60}\b(?:vinbank|noi\s+bo|internal|system|he\s+thong|current|actual|real)\b",
+    r"\b(?:vinbank|noi\s+bo|internal|system|he\s+thong|current|actual|real)\b.{0,60}\b(?:api[_\s-]?key|khoa\s+api|secret\s+key|access\s+token)\b",
+    r"\b(?:db[_\s-]?host|database\s+host|database\s+address|dia\s+chi\s+(?:co\s+so\s+du\s+lieu|database)|host\s+noi\s+bo)\b",
+    r"\b(?:cau\s+hinh|config(?:uration)?|connection\s+string)\b.{0,80}\b(?:noi\s+bo|internal|database|db|system|he\s+thong|vinbank)\b",
+    r"\b(?:internal\s+note|private\s+context|protected\s+data|ghi\s+chu\s+noi\s+bo|du\s+lieu\s+bao\s+ve|thong\s+tin\s+noi\s+bo)\b",
+    r"\b(?:xac\s+nhan|kiem\s+tra|confirm|verify|is)\b.{0,80}\b(?:admin\s+password|mat\s+khau\s+admin|api[_\s-]?key|db[_\s-]?host|database\s+host)\b",
+)
+
 EXTRA_ALLOWED_TOPICS = (
     "bank", "debit", "mortgage", "statement", "pin", "otp", "fee", "hotline",
     "mat khau", "ma pin", "ma otp", "sao ke", "rut tien", "nap tien", "phi",
+    "vang", "giu ho", "ket an toan", "gold", "safe deposit",
 )
 
 
@@ -139,6 +151,22 @@ def detect_harmful_intent(user_input: str) -> InputStatus:
     return "ALLOW"
 
 
+def detect_secret_request(user_input: str) -> InputStatus:
+    """Block requests to retrieve, validate, or repeat protected credentials."""
+    normalized = normalize_security_text(user_input, strip_accents=True)
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    for secret in DEMO_SECRETS:
+        secret_compact = re.sub(r"[^a-z0-9]", "", secret.casefold())
+        if secret_compact and secret_compact in compact:
+            return "BLOCK"
+    if any(
+        re.search(pattern, normalized, re.IGNORECASE)
+        for pattern in SECRET_REQUEST_PATTERNS
+    ):
+        return "BLOCK"
+    return "ALLOW"
+
+
 # ============================================================
 # Implement topic_filter()
 #
@@ -165,6 +193,9 @@ def topic_filter(user_input: str) -> InputStatus:
         return "BLOCK"
 
     if detect_harmful_intent(normalized) == "BLOCK":
+        return "BLOCK"
+
+    if detect_secret_request(normalized) == "BLOCK":
         return "BLOCK"
 
     if any(_contains_topic(normalized, topic) for topic in BLOCKED_TOPICS):
@@ -238,6 +269,13 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
             return self._block_response(
                 "I cannot help with theft, robbery, or unauthorized physical access. "
                 "I can explain legitimate VinBank security and account procedures."
+            )
+
+        if detect_secret_request(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "I cannot retrieve, repeat, or confirm internal credentials or "
+                "configuration. I can explain safe account-security practices."
             )
 
         if topic_filter(text) == "BLOCK":

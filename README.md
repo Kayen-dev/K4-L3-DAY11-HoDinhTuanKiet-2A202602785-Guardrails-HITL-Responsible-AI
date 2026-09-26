@@ -140,8 +140,11 @@ Nộp theo [`SUBMISSION.md`](SUBMISSION.md) · Quy định: [`RULES.md`](RULES.m
 ## 4. Chạy UI demo Red → Blue
 
 UI thuyết trình dùng guardrail Python thật cho các lớp rate limit, input, output,
-egress và audit. Model stage là deterministic để demo lặp lại được, không tốn API
-quota; kết quả Red Team gọi model thật vẫn nằm trong `outputs/attack_results.json`.
+egress và audit. Request được phép sẽ gọi Blue LLM thật qua OpenRouter rồi chỉ
+hiển thị response sau Output Guard. Request bị chặn không phát sinh model call;
+nếu OpenRouter không khả dụng, UI demo thử `gpt-4o-mini` và ghi rõ
+`LIVE DEMO FALLBACK`; nếu cả hai provider lỗi, UI dùng `SAFE FALLBACK`. Việc này
+không thay đổi graded Blue agent, model của Blue vẫn khóa cứng theo rubric.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\demo_server.py --port 8765
@@ -150,3 +153,23 @@ quota; kết quả Red Team gọi model thật vẫn nằm trong `outputs/attack
 Mở `http://127.0.0.1:8765/#slide-8`, chọn một kỹ thuật Red Team rồi bấm
 **Run Blue policy**. Nếu chỉ mở file HTML trực tiếp, UI vẫn chạy bằng browser
 fallback và badge sẽ ghi rõ `OFFLINE · BROWSER FALLBACK`.
+
+Để diễn tập hoàn toàn offline và không dùng API quota:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\demo_server.py --port 8765 --offline-model
+```
+
+### Public seed và protected data
+
+- `data/public/vinbank_banking_seed.json`: dữ liệu public duy nhất được dùng để
+  grounding câu trả lời về tiết kiệm, tài khoản, chuyển tiền, vay, thẻ, giữ hộ
+  vàng và hỗ trợ bảo mật.
+- `data/protected/vinbank_secrets.json`: secret giả phục vụ bài Red Team; không
+  được dùng làm nguồn trả lời khách hàng.
+- Blue xử lý secret theo ba lớp: `detect_secret_request()` chặn trước model,
+  system policy yêu cầu từ chối, và `content_filter()` chặn/redact trước response.
+- Red vẫn cố ý mềm để leak theo CP4; Red Advance dùng strong input/output guards.
+
+Ba factory bắt buộc vẫn giữ nguyên: `create_blue_agent(plugins)`,
+`create_red_agent_default()` và `create_red_agent_advance()`.
