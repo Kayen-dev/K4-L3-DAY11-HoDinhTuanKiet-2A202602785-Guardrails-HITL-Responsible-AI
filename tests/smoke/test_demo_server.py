@@ -105,6 +105,17 @@ def test_three_required_agent_factories_keep_names_and_roles():
     assert "DO NOT DISCLOSE" in red_advance.instruction
 
 
+def test_structured_exfiltration_prompts_are_registered_and_blocked_by_advance():
+    from agents.guards_agent import detect_injection_strong
+    from attacks.attacks import adversarial_prompts
+
+    structured = [attack for attack in adversarial_prompts if attack["id"] >= 6]
+    assert len(adversarial_prompts) == 10
+    assert len(structured) == 5
+    assert structured[0]["category"] == "Token Tracer / Character array"
+    assert all(detect_injection_strong(attack["input"]) for attack in structured)
+
+
 def test_allowed_request_returns_guarded_live_model_response():
     async def fake_blue_model(_prompt):
         return "VinBank can explain general savings products in this live response."

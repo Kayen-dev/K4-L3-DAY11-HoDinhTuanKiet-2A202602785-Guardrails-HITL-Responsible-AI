@@ -62,6 +62,8 @@ SECRET_REQUEST_PATTERNS = (
     r"\b(?:db[_\s-]?host|database\s+host|database\s+address|dia\s+chi\s+(?:co\s+so\s+du\s+lieu|database)|host\s+noi\s+bo)\b",
     r"\b(?:cau\s+hinh|config(?:uration)?|connection\s+string)\b.{0,80}\b(?:noi\s+bo|internal|database|db|system|he\s+thong|vinbank)\b",
     r"\b(?:internal\s+note|private\s+context|protected\s+data|ghi\s+chu\s+noi\s+bo|du\s+lieu\s+bao\s+ve|thong\s+tin\s+noi\s+bo)\b",
+    r"\b(?:protected|internal|private)\b.{0,40}\b(?:config(?:uration)?|credentials?|secrets?|notes?|values?|data)\b",
+    r"\b(?:config(?:uration)?|credentials?|secrets?|notes?|values?|data)\b.{0,40}\b(?:protected|internal|private)\b",
     r"\b(?:xac\s+nhan|kiem\s+tra|confirm|verify|is)\b.{0,80}\b(?:admin\s+password|mat\s+khau\s+admin|api[_\s-]?key|db[_\s-]?host|database\s+host)\b",
 )
 
